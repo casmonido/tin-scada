@@ -22,17 +22,16 @@ notEmpty = threading.Condition() #wait(), notify()
 
 class ServerThread (threading.Thread):
 
-    def __init__(self, ip, port, scadaMessage, serverReply):
-        threading.Thread.__init__(self)
-        self.ip = ip
-        self.port = port
-        self.scadaMessage = scadaMessage
-        self.serverReply = serverReply
+	def __init__(self, ip, port, scadaMessage, serverReply):
+		threading.Thread.__init__(self)
+		self.ip = ip
+		self.port = port
+		self.scadaMessage = scadaMessage
+		self.serverReply = serverReply
 
 	def run(self):
-
 		ServerSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		ServerSock.connect(self.ip, self.port)
+		ServerSock.connect((self.ip, self.port))
 		print("ServerThread connected...")
 		while 1:
 
