@@ -60,7 +60,7 @@ class ClientThread (threading.Thread):
 			print("ClientThread receiving data...")
 			myScadaMessage = self.ClientSock.recv(BUFFER_SIZE) # tak chyba nie mozna do StringIO 
 
-			if outsideMutex.testandset() == false:
+			if outsideMutex.testandset() == False:
 				notEmpty.wait()
 			scadaMessage = myScadaMessage
 			waitngForMessage.release()
