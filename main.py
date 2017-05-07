@@ -58,7 +58,7 @@ class ClientThread (threading.Thread):
 	def run(self):
 		while 1:
 			print("ClientThread receiving data...")
-			myScadaMessage = ClientSock.recv(BUFFER_SIZE) # tak chyba nie mozna do StringIO 
+			myScadaMessage = self.ClientSock.recv(BUFFER_SIZE) # tak chyba nie mozna do StringIO 
 
 			if outsideMutex.testandset() == false:
 				notEmpty.wait()
@@ -87,7 +87,7 @@ ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 ClientSock.bind((SCADA_IP, SCADA_PORT))
 ClientSock.listen(1)
 while 1:
-	NewClientSock = ClientSock.accept()
+	NewClientSock = ClientSock.accept()[0]
 	newthread = ClientThread(NewClientSock, scadaMessage, serverReply) 
 	client_threads_collection.append(newthread) 
 	newthread.start()
