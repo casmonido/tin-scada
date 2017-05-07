@@ -49,11 +49,11 @@ class ServerThread (threading.Thread):
 
 class ClientThread (threading.Thread):
 
-    def __init__(self, ClientSock, scadaMessage, serverReply):
-        threading.Thread.__init__(self)
-        self.ClientSock = ClientSock
-        self.scadaMessage = scadaMessage
-        self.serverReply = serverReply
+	def __init__(self, ClientSock, scadaMessage, serverReply):
+		threading.Thread.__init__(self)
+		self.ClientSock = ClientSock
+		self.scadaMessage = scadaMessage
+		self.serverReply = serverReply
 
 	def run(self):
 		while 1:
