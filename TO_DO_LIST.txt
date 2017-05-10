@@ -1,0 +1,5 @@
+TO DO (jak widzicie ze czegos tutaj nie ma, to dopisujcie):
+1. obsluga wyjatkow
+2. rozbindowanie gniazd
+3. plik konfiguracyjny
+4. profesjonalne testy (chyba w shellu)
