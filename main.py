@@ -5,13 +5,16 @@ import socket
 import sys
 import mutex
 import threading
+import time
+import logging
 
 import SLMP
 import StringIO
 
 SCADA_IP = '127.0.0.1' # docelowo do pliku konfiguracyjnego 
-SCADA_PORT = 1280 
+SCADA_PORT = 1298
 BUFFER_SIZE = 2000 # sa rozne dla scady i servera - do zmiany
+PLC_SERVER_PORT = 2010
 
 
 # i guess these should not be global as well
@@ -35,25 +38,30 @@ class ServerThread (threading.Thread):
 		global scadaMessage, serverReply
 		ServerSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		ServerSock.connect((self.ip, self.port))
-		print("ServerThread connected...")
+		
+		logging.debug('ServerThread connected')
+		#print("ServerThread connected...")
 		while 1:
 
 			waitngForMessage.acquire()
 
-
-			print("Will send Client Message to server soon")
-			print SLMP.binary_array2string(scadaMessage)
+			#logging.debug( 'Will send Client Message to server soon: ',  SLMP.binary_array2string(scadaMessage))
+			#print "Will send Client Message to server soon: ",  SLMP.binary_array2string(scadaMessage)
+			
 
 			ServerSock.send(scadaMessage) 
 			myServerReply = ServerSock.recv(BUFFER_SIZE)
+			logging.debug(SLMP.binary_array2string(myServerReply))
 
-			print SLMP.binary_array2string(myServerReply)
+			#print SLMP.binary_array2string(myServerReply)
 
 			serverReply = myServerReply
+			logging.debug(' waitingForResponse.release() before ')
 			waitingForResponse.release()
+			logging.debug(' waitingForResponse.release() after')
 
-		print "Exiting Server Thread"
-		ServerSock.close()
+		logging.debug( 'Exiting Server Thread' )
+		ServerSock.close() 
 
 
 
@@ -65,44 +73,51 @@ class ClientThread (threading.Thread):
 		self.ClientSock = ClientSock
 
 	def run(self):
+
 		global occupied, scadaMessage, serverReply
-		while 1:
-			print("ClientThread receiving data...")
-			myScadaMessage = self.ClientSock.recv(BUFFER_SIZE) # tak chyba nie mozna do StringIO
+		#while 1:
+		logging.debug('ClientThread receiving data...')
+		myScadaMessage = self.ClientSock.recv(BUFFER_SIZE) # tak chyba nie mozna do StringIO
 
 
-			notEmpty.acquire()
-			while occupied == 1:
-				notEmpty.wait()
-			occupied = 1
+		notEmpty.acquire()
+		while occupied == 1:
+			notEmpty.wait()
+		occupied = 1
 
-			notEmpty.release()
+		notEmpty.release()
 
-			scadaMessage = myScadaMessage
+		scadaMessage = myScadaMessage
 
-			print(occupied)
-			print SLMP.binary_array2string(scadaMessage)
+		#print "occupied: " , occupied 
+		#print(occupied)
+		#print "scadaMessage: " , SLMP.binary_array2string(scadaMessage)
+		
+		waitngForMessage.release()
+		logging.debug('Client waiting for response')
+		time.sleep(5)
+		waitingForResponse.acquire()
+		myServerReply = serverReply
+		logging.debug ('Client wake up')
+		notEmpty.acquire()
+		occupied = 0
+		
+		self.ClientSock.send(myServerReply)
+		logging.debug('To Client Sent message')			
+		notEmpty.notify()
+		notEmpty.release()
 			
-			waitngForMessage.release()
-			print("Client waiting for response")
-			waitingForResponse.acquire()
-			myServerReply = serverReply
-
-			notEmpty.acquire()
-			zajete = 0
-			notEmpty.notify()
-			notEmpty.release()
-
-			self.ClientSock.send(myServerReply)
-		print "Exiting Client Thread"
-		ClientSock.close()
+		logging.debug('Exiting Client Thread')
+		self.ClientSock.close()
 
 
 
 #main
+logging.basicConfig(level=logging.DEBUG,format='[%(levelname)s] (%(threadName)-9s) %(message)s',)
+
 client_threads_collection = []
 
-serverthread = ServerThread('127.0.0.1', 1780)
+serverthread = ServerThread('127.0.0.1', PLC_SERVER_PORT)
 serverthread.start()
 
 ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -118,7 +133,7 @@ while 1:
 serverthread.join()
 for x in client_threads_collection:
 	x.join()
-print "Exiting Main Thread"
+logging.debug('Exiting Main Thread')
 ClientSock.close()
-0
+
 
