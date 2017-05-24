@@ -1,5 +1,4 @@
 #!/usr/bin/python2
-#trzeba zmienic plc_server.y PORT na 1780
 from struct import *
 import socket
 import sys
@@ -7,24 +6,48 @@ import mutex
 import threading
 import time
 import logging
-
 import SLMP
 import StringIO
+import linecache
 
-SCADA_IP = '127.0.0.1' # docelowo do pliku konfiguracyjnego 
-SCADA_PORT = 1298
-BUFFER_SIZE = 2000 # sa rozne dla scady i servera - do zmiany
-PLC_SERVER_PORT = 2010
+#zawartosc pliku konfiguracyjnego, nadawane funkcja configure
+global SCADA_IP  
+global SCADA_PORT 
+global BUFFER_SIZE  # sa rozne dla scady i servera - do zmiany
+global PLC_SERVER_PORT 
 
+#mutexy na ktorych zawieszac sie beda serwer i klient
+waitngForMessage = threading.Semaphore(0)  
+waitingForResponse = threading.Semaphore(0) 
 
-# i guess these should not be global as well
-waitngForMessage = threading.Semaphore(0)  # should have been a mutex with initial value of zero
-waitingForResponse = threading.Semaphore(0) #acquire(), release()
 notEmpty = threading.Condition() #wait(), notify()
 occupied = 0
-#wouldn't get recognized as non-global
+
+
 scadaMessage = ""
 serverReply = ""
+
+def configure():
+	global SCADA_IP  # docelowo do pliku konfiguracyjnego 
+	global SCADA_PORT 
+	global BUFFER_SIZE  # sa rozne dla scady i servera - do zmiany
+	global PLC_SERVER_PORT 
+	configureFile = open("config.txt")
+	#pobieramy linie
+	SCADA_IP =linecache.getline("config.txt" , 1) 
+	## sa w formacie string bierzemy wszystko od 10 znaku do przedostatniego
+	SCADA_IP = SCADA_IP[10:-1]					
+	SCADA_PORT =linecache.getline("config.txt" , 2)
+	SCADA_PORT = SCADA_PORT[12:-1]
+	SCADA_PORT = int(SCADA_PORT)
+	BUFFER_SIZE =linecache.getline("config.txt", 3)
+	BUFFER_SIZE = BUFFER_SIZE[13:-1]
+	BUFFER_SIZE = int(BUFFER_SIZE)  ##wymaga dodatkowego rzutowania, chcemy inta a nie stringa
+	PLC_SERVER_PORT =linecache.getline("config.txt" , 4)
+	PLC_SERVER_PORT = PLC_SERVER_PORT[17:-1]
+	PLC_SERVER_PORT = int(PLC_SERVER_PORT)
+
+	configureFile.close()
 
 class ServerThread (threading.Thread):
 
@@ -38,31 +61,18 @@ class ServerThread (threading.Thread):
 		global scadaMessage, serverReply
 		ServerSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		ServerSock.connect((self.ip, self.port))
-		
 		logging.debug('ServerThread connected')
-		#print("ServerThread connected...")
+		
 		while 1:
 
 			waitngForMessage.acquire()
-
-			#logging.debug( 'Will send Client Message to server soon: ',  SLMP.binary_array2string(scadaMessage))
-			#print "Will send Client Message to server soon: ",  SLMP.binary_array2string(scadaMessage)
-			
 
 			ServerSock.send(scadaMessage) 
 			myServerReply = ServerSock.recv(BUFFER_SIZE)
 			logging.debug(SLMP.binary_array2string(myServerReply))
 
-			#print SLMP.binary_array2string(myServerReply)
-
 			serverReply = myServerReply
-			logging.debug(' waitingForResponse.release() before ')
 			waitingForResponse.release()
-			logging.debug(' waitingForResponse.release() after')
-
-		logging.debug( 'Exiting Server Thread' )
-		ServerSock.close() 
-
 
 
 
@@ -89,10 +99,6 @@ class ClientThread (threading.Thread):
 
 		scadaMessage = myScadaMessage
 
-		#print "occupied: " , occupied 
-		#print(occupied)
-		#print "scadaMessage: " , SLMP.binary_array2string(scadaMessage)
-		
 		waitngForMessage.release()
 		logging.debug('Client waiting for response')
 		time.sleep(5)
@@ -113,11 +119,14 @@ class ClientThread (threading.Thread):
 
 
 #main
+configure()
+
 logging.basicConfig(level=logging.DEBUG,format='[%(levelname)s] (%(threadName)-9s) %(message)s',)
 
 client_threads_collection = []
 
 serverthread = ServerThread('127.0.0.1', PLC_SERVER_PORT)
+serverthread.daemon = True   ##to znaczy ze watek zostanie zamkniety/umrze jak zginie watek glowny
 serverthread.start()
 
 ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -126,14 +135,8 @@ ClientSock.listen(1)
 while 1:
 	NewClientSock = ClientSock.accept()[0]
 	newthread = ClientThread(NewClientSock) 
-	client_threads_collection.append(newthread) 
+	client_threads_collection.append(newthread)
+	newthread.daemon = True  ##to znaczy ze watek zostanie zamkniety/umrze jak zginie watek glowny
 	newthread.start()
 	#NewClientSock.close() # dunno 
-
-serverthread.join()
-for x in client_threads_collection:
-	x.join()
-logging.debug('Exiting Main Thread')
-ClientSock.close()
-
 
