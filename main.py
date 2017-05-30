@@ -45,7 +45,7 @@ def configure(configFilePath):
 
 
 
-# funkcja pomocnicza do odbierania zadanej liczby bajtow za pomaca recv()
+# funkcja pomocnicza do odbierania zadanej liczby bajtow za pomaca recv(), jesli bedzie mniej bajtow zwraca None
 def recvall(sock, expectedLen):
 	data = ''
 	while len(data) < expectedLen:
@@ -86,6 +86,7 @@ class ServerThread (threading.Thread):
 
 			ServerSock.send(scadaMessage)
 
+			# tu moga byc bledy -- do obsluzenia
 			myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
 			msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
 			myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
@@ -105,36 +106,40 @@ class ClientThread (threading.Thread):
 
 	def run(self):
 		global occupied, scadaMessage, serverReply
-		#while 1:
- 
-		myScadaMessage = recvall(self.ClientSock, 9) 
-		print('[ClientThread]\t Receiving message')
-		msgLen = struct.unpack('<H', myScadaMessage[7:])
-		myScadaMessage += recvall(self.ClientSock, msgLen[0]) 
-		logging.debug(SLMP.binary_array2string(myScadaMessage))
+		while True:
 
-		notEmpty.acquire()
-		while occupied == 1:
-			notEmpty.wait()
-		occupied = 1
-		notEmpty.release()
+			myScadaMessage = recvall(self.ClientSock, 9)
+			if myScadaMessage == None: # jesli nie udalo sie odebrac chociaz naglowka, wyjdz
+			 	print('[ClientThread]\t Exiting')
+				self.ClientSock.close()
+				return
+			print('[ClientThread]\t Receiving message') 
+			msgLen = struct.unpack('<H', myScadaMessage[7:])
+			myScadaMessage += recvall(self.ClientSock, msgLen[0]) # tu tez potencjalnie moga byc bledy
+			logging.debug(SLMP.binary_array2string(myScadaMessage))
 
-		scadaMessage = myScadaMessage
+			notEmpty.acquire()
+			while occupied == 1:
+				notEmpty.wait()
+			occupied = 1
+			notEmpty.release()
 
-		waitngForMessage.release()
-		print('[ClientThread]\t Waiting for response from server')
-		time.sleep(2)
+			scadaMessage = myScadaMessage
 
-		waitingForResponse.acquire()
-		myServerReply = serverReply
+			waitngForMessage.release()
+			print('[ClientThread]\t Waiting for response from server')
+			time.sleep(2)
 
-		notEmpty.acquire()
-		occupied = 0
-		notEmpty.notify()
-		notEmpty.release()
+			waitingForResponse.acquire()
+			myServerReply = serverReply
 
-		self.ClientSock.send(myServerReply)
-		print('[ClientThread]\t Reply sent to SCADA')
+			notEmpty.acquire()
+			occupied = 0
+			notEmpty.notify()
+			notEmpty.release()
+
+			self.ClientSock.send(myServerReply) # tu tez moga byc bledy, tez exit
+			print('[ClientThread]\t Reply sent to SCADA')
 
 
 
@@ -156,7 +161,7 @@ ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 ClientSock.bind((SCADA_IP, SCADA_PORT))
 ClientSock.listen(1)
 print("Proxy oczekuje polaczen na porcie " + str(SCADA_PORT))
-while 1:
+while True:
 	NewClientSock = ClientSock.accept()[0]
 	newThread = ClientThread(NewClientSock) 
 	clientThreadsCollection.append(newThread)
