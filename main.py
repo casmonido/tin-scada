@@ -7,6 +7,7 @@ import mutex
 import threading
 import time
 import logging
+import logging.config
 import SLMP
 import linecache
 import errno
@@ -74,13 +75,13 @@ class ServerThread (threading.Thread):
 			except socket_error as serr:
 				if serr.errno != errno.ECONNREFUSED:
 					raise serr # to nie jest blad ktory chcemy obsluzyc - re-raise
-				print('[ServerThread]\t Waiting for connection to the server...')
+				logger_debug.debug('[ServerThread]\t Waiting for connection to the server...')
 				time.sleep(5)
 				continue # sprobuj ponownie
 			else: # jesli nie bylo except, idz dalej
 				break
 
-		print('[ServerThread]\t Connected')
+		logger_debug.debug('[ServerThread]\t Connected')
 		while 1:
 			waitngForMessage.acquire()
 
@@ -91,7 +92,7 @@ class ServerThread (threading.Thread):
 			msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
 			myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
 
-			logging.debug(SLMP.binary_array2string(myServerReply))
+			logger_debug.debug(SLMP.binary_array2string(myServerReply))
 			serverReply = myServerReply
 
 			waitingForResponse.release()
@@ -110,13 +111,13 @@ class ClientThread (threading.Thread):
 
 			myScadaMessage = recvall(self.ClientSock, 9)
 			if myScadaMessage == None: # jesli nie udalo sie odebrac chociaz naglowka, wyjdz
-			 	print('[ClientThread]\t Exiting')
+			 	logger_debug.debug('[ClientThread]\t Exiting')
 				self.ClientSock.close()
 				return
-			print('[ClientThread]\t Receiving message') 
+			logger_debug.debug('[ClientThread]\t Receiving message') 
 			msgLen = struct.unpack('<H', myScadaMessage[7:])
 			myScadaMessage += recvall(self.ClientSock, msgLen[0]) # tu tez potencjalnie moga byc bledy
-			logging.debug(SLMP.binary_array2string(myScadaMessage))
+			logger_debug.debug(SLMP.binary_array2string(myScadaMessage))
 
 			notEmpty.acquire()
 			while occupied == 1:
@@ -127,7 +128,7 @@ class ClientThread (threading.Thread):
 			scadaMessage = myScadaMessage
 
 			waitngForMessage.release()
-			print('[ClientThread]\t Waiting for response from server')
+			logger_debug.debug('[ClientThread]\t Waiting for response from server')
 			time.sleep(2)
 
 			waitingForResponse.acquire()
@@ -139,17 +140,30 @@ class ClientThread (threading.Thread):
 			notEmpty.release()
 
 			self.ClientSock.send(myServerReply) # tu tez moga byc bledy, tez exit
-			print('[ClientThread]\t Reply sent to SCADA')
+			logger_debug.debug('[ClientThread]\t Reply sent to SCADA')
+			logger_info.info('\n' + 'IP\t\t  -->\t  ' + str(SCADA_IP) + '\n' + 
+				 'SCADA_PORT\t  -->\t  ' + str(SCADA_PORT) + '\n' +
+				 'SCADA_MESSAGE\t  -->\t  ' + repr(scadaMessage) + '\n' +
+				 'SERVER_PORT\t  -->\t  ' + str(PLC_SERVER_PORT) + '\n' + 
+				 'SERVER_REPLY\t  -->\t  ' + repr(serverReply) + '\n' +
+				 '********************************************************************************************')
 
 
 
 
 # konfiguracja srodowiska: 
 if  len(sys.argv) < 2:
-	print("Przy wywolywaniu programu, podaj sciezke do pliku konfiguracyjnego")
+	logger_debug.debug("Przy wywolywaniu programu, podaj sciezke do pliku konfiguracyjnego")
 	quit()
 configure(sys.argv[1])
-logging.basicConfig(level=logging.DEBUG,format='[%(levelname)s] (%(threadName)-9s) %(message)s',)
+
+
+#logger configuration file
+logging.config.fileConfig('logger.conf')
+
+# create logger
+logger_info = logging.getLogger('IMessage')
+logger_debug = logging.getLogger('DMessage')
 
 # tworzenie watkow:
 serverThread = ServerThread('127.0.0.1', PLC_SERVER_PORT)
@@ -160,10 +174,13 @@ clientThreadsCollection = []
 ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 ClientSock.bind((SCADA_IP, SCADA_PORT))
 ClientSock.listen(1)
-print("Proxy oczekuje polaczen na porcie " + str(SCADA_PORT))
+logger_debug.debug("Proxy oczekuje polaczen na porcie " + str(SCADA_PORT))
 while True:
 	NewClientSock = ClientSock.accept()[0]
 	newThread = ClientThread(NewClientSock) 
 	clientThreadsCollection.append(newThread)
 	newThread.daemon = True
 	newThread.start()
+
+#if (serverThread.isAlive() != True):
+#	logger_debug.debug('[ServerThread]\t Closed connection with server')
