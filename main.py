@@ -11,6 +11,7 @@ import logging.config
 import SLMP
 import linecache
 import errno
+import requests
 from socket import error as socket_error
 
 # zmienne do synchronizacji
@@ -50,7 +51,12 @@ def configure(configFilePath):
 def recvall(sock, expectedLen):
 	data = ''
 	while len(data) < expectedLen:
-		packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
+		sock.settimeout(5) 
+		try:
+			packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
+		except socket.timeout:
+			sock.settimeout(0) 
+			return None
 		if not packet:
 			return None
 		data += packet
@@ -82,6 +88,7 @@ class ServerThread (threading.Thread):
 				break
 
 		logger_debug.debug('[ServerThread]\t Connected')
+		
 		while 1:
 			waitngForMessage.acquire()
 
@@ -147,7 +154,6 @@ class ClientThread (threading.Thread):
 				 'SERVER_PORT\t  -->\t  ' + str(PLC_SERVER_PORT) + '\n' + 
 				 'SERVER_REPLY\t  -->\t  ' + repr(serverReply) + '\n' +
 				 '********************************************************************************************')
-
 
 
 
