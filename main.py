@@ -54,13 +54,37 @@ def recvall(sock, expectedLen):
 		sock.settimeout(5) 
 		try:
 			packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
-		except socket.timeout:
-			sock.settimeout(0) 
-			return None
-		if not packet:
+		except socket_error as serr:
+			raise serr
+		finally:
+			sock.settimeout(0)
+		if not packet: # should it be in finally? i dont know
 			return None
 		data += packet
 	return data
+
+
+
+
+#funkcja pomocnicza uzywana przez ServerThread, do ponawiania prob polaczenia z serwerem
+def reconnect(addr, port):
+	logger_debug.debug('[ServerThread]\t Disconnected from the server')
+	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	# w razie braku polaczenia ponawiaj proby
+	while True:
+		try:
+			connected = sock.connect((addr, port))
+		except socket_error as serr:
+			if serr.errno != errno.ECONNREFUSED:
+				raise serr # to nie jest blad ktory chcemy obsluzyc - re-raise
+			logger_debug.debug('[ServerThread]\t Waiting for connection to the server...')
+			time.sleep(2)
+			continue # sprobuj ponownie
+		else: # jesli nie bylo except, idz dalej
+			break
+	logger_debug.debug('[ServerThread]\t Connected')
+	return sock
+
 
 
 
@@ -73,32 +97,47 @@ class ServerThread (threading.Thread):
 
 	def run(self):
 		global scadaMessage, serverReply
-		ServerSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		# w razie braku polaczenia z serwerem ponawiaj proby
-		while True:
-			try:
-				connected = ServerSock.connect((self.ip, self.port))
-			except socket_error as serr:
-				if serr.errno != errno.ECONNREFUSED:
-					raise serr # to nie jest blad ktory chcemy obsluzyc - re-raise
-				logger_debug.debug('[ServerThread]\t Waiting for connection to the server...')
-				time.sleep(5)
-				continue # sprobuj ponownie
-			else: # jesli nie bylo except, idz dalej
-				break
-
-		logger_debug.debug('[ServerThread]\t Connected')
+		ServerSock = reconnect(self.ip, self.port)
 		
-		while 1:
+		while True:
 			waitngForMessage.acquire()
 
-			ServerSock.send(scadaMessage)
+			# obsluguj do skutku
+			while True:
 
-			# tu moga byc bledy -- do obsluzenia
-			myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
-			msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
-			myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
+				ServerSock.settimeout(5) 
+				try:
+					ServerSock.send(scadaMessage)
+				except socket_error as serr:
+					ServerSock.settimeout(0)
+					ServerSock.close()
+					ServerSock = reconnect(self.ip, self.port)
+					continue
+				else:
+					ServerSock.settimeout(0)
+				logger_debug.debug('[ServerThread]\t Wiadomosc SCADy wyslana na serwer')
+				# pobierz naglowek odpowiedzi 
+				# jesli sie nie uda, po resecie polaczenia trzeba wrocic DO WYSYLANIA WIADOMOSCI DO SEWERA
+				try:
+					myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
+				except socket_error as serr:
+					ServerSock.close()
+					ServerSock = reconnect(self.ip, self.port)
+					continue
+				logger_debug.debug('[ServerThread]\t Pobrano naglowek odpowiedzi')
+				# dowiedz sie jak dluga jest reszta 
+				msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
+				# pobierz reszte
+				try:
+					myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
+				except socket_error as serr:
+					ServerSock.close()
+					ServerSock = reconnect(self.ip, self.port)
+					continue
+				else:
+					break # wszystko sie udalo, mozna isc dalej
 
+			logger_debug.debug('[ServerThread]\t Uzyskano odpowiedz serwera')
 			logger_debug.debug(SLMP.binary_array2string(myServerReply))
 			serverReply = myServerReply
 
