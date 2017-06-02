@@ -52,13 +52,10 @@ def recvall(sock, expectedLen):
 	data = ''
 	while len(data) < expectedLen:
 		sock.settimeout(5) 
-		try:
-			packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
-		except socket_error as serr:
-			raise serr
-		finally:
-			sock.settimeout(0)
-		if not packet: # should it be in finally? i dont know
+		packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
+		sock.settimeout(0)
+		if not packet: # 0 jesli 'connection reset by peer'
+			logger_debug.debug('Receive returning empty string')
 			return None
 		data += packet
 	return data
@@ -101,26 +98,20 @@ class ServerThread (threading.Thread):
 		
 		while True:
 			waitngForMessage.acquire()
-
-			# obsluguj do skutku
+			# scadaMessage czeka w swoim buforze. 
+			# obsluguj ja do skutku
 			while True:
-
+				
 				ServerSock.settimeout(5) 
-				try:
-					ServerSock.send(scadaMessage)
-				except socket_error as serr:
-					ServerSock.settimeout(0)
+				if ServerSock.sendall(scadaMessage) != None: # nie bylo nic o kodzie bledu, ale nie lapalo mi exceptions 
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
-				else:
-					ServerSock.settimeout(0)
 				logger_debug.debug('[ServerThread]\t Wiadomosc SCADy wyslana na serwer')
 				# pobierz naglowek odpowiedzi 
 				# jesli sie nie uda, po resecie polaczenia trzeba wrocic DO WYSYLANIA WIADOMOSCI DO SEWERA
-				try:
-					myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
-				except socket_error as serr:
+				myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
+				if myServerReply == None:
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
@@ -128,9 +119,8 @@ class ServerThread (threading.Thread):
 				# dowiedz sie jak dluga jest reszta 
 				msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
 				# pobierz reszte
-				try:
-					myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
-				except socket_error as serr:
+				myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
+				if myServerReply == None:
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
@@ -217,7 +207,7 @@ serverThread.start()
 
 clientThreadsCollection = []
 ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-ClientSock.bind((SCADA_IP, SCADA_PORT))
+ClientSock.bind((SCADA_IP, SCADA_PORT)) #socket.gethostname() for IP does not work
 ClientSock.listen(1)
 logger_debug.debug("Proxy oczekuje polaczen na porcie " + str(SCADA_PORT))
 while True:
