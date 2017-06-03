@@ -51,10 +51,12 @@ def configure(configFilePath):
 def recvall(sock, expectedLen):
 	data = ''
 	while len(data) < expectedLen:
-		sock.settimeout(5) 
-		packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
-		sock.settimeout(0)
-		if not packet: # 0 jesli 'connection reset by peer'
+		try:
+			packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
+		except socket.timeout as err:
+			logger_debug.debug('Timeout error - receive returning empty string')
+			return None
+		if not packet: # None jesli 'connection reset by peer'
 			logger_debug.debug('Receive returning empty string')
 			return None
 		data += packet
@@ -70,14 +72,15 @@ def reconnect(addr, port):
 	# w razie braku polaczenia ponawiaj proby
 	while True:
 		try:
-			connected = sock.connect((addr, port))
+			sock.connect((addr, port))
 		except socket_error as serr:
 			if serr.errno != errno.ECONNREFUSED:
 				raise serr # to nie jest blad ktory chcemy obsluzyc - re-raise
 			logger_debug.debug('[ServerThread]\t Waiting for connection to the server...')
-			time.sleep(2)
+			time.sleep(3)
 			continue # sprobuj ponownie
 		else: # jesli nie bylo except, idz dalej
+			sock.settimeout(5)
 			break
 	logger_debug.debug('[ServerThread]\t Connected')
 	return sock
@@ -102,32 +105,39 @@ class ServerThread (threading.Thread):
 			# obsluguj ja do skutku
 			while True:
 				
-				ServerSock.settimeout(5) 
-				if ServerSock.sendall(scadaMessage) != None: # nie bylo nic o kodzie bledu, ale nie lapalo mi exceptions 
+				try:
+					retVal = ServerSock.sendall(scadaMessage) 
+				except Exception:
+					logger_debug.debug('[ServerThread]\t Exception raised by sendall - unlikely when running on the same PC')
+				if retVal != None: # blad
+					logger_debug.debug('[ServerThread]\t Sending request to server unsuccessful')
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
-				logger_debug.debug('[ServerThread]\t Wiadomosc SCADy wyslana na serwer')
+				logger_debug.debug('[ServerThread]\t SCADA message sent to server')
 				# pobierz naglowek odpowiedzi 
 				# jesli sie nie uda, po resecie polaczenia trzeba wrocic DO WYSYLANIA WIADOMOSCI DO SEWERA
-				myServerReply = recvall(ServerSock, 9) # to find out why 9, see SMLP manual page 23
+				myServerReply = recvall(ServerSock, 9) # pobierz 9 znakow - zob. SMLP manual str. 23
 				if myServerReply == None:
+					logger_debug.debug('[ServerThread]\t Error receiving server\'s reply header')
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
-				logger_debug.debug('[ServerThread]\t Pobrano naglowek odpowiedzi')
+				logger_debug.debug('[ServerThread]\t Received server\'s reply header')
 				# dowiedz sie jak dluga jest reszta 
 				msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
 				# pobierz reszte
-				myServerReply += recvall(ServerSock, msgLen[0]) # msgLen is a tuple
-				if myServerReply == None:
+				tempServerReply = recvall(ServerSock, msgLen[0]) # msgLen to tuple (krotka)
+				if tempServerReply == None:
+					logger_debug.debug('[ServerThread]\t Error receiving server\'s reply')
 					ServerSock.close()
 					ServerSock = reconnect(self.ip, self.port)
 					continue
 				else:
+					myServerReply += tempServerReply
+					logger_debug.debug('[ServerThread]\t Received server reply')
 					break # wszystko sie udalo, mozna isc dalej
 
-			logger_debug.debug('[ServerThread]\t Uzyskano odpowiedz serwera')
 			logger_debug.debug(SLMP.binary_array2string(myServerReply))
 			serverReply = myServerReply
 
@@ -144,15 +154,22 @@ class ClientThread (threading.Thread):
 	def run(self):
 		global occupied, scadaMessage, serverReply
 		while True:
-
+			logger_debug.debug('[ClientThread]\t Waitng for message')
+			time.sleep(3)
 			myScadaMessage = recvall(self.ClientSock, 9)
 			if myScadaMessage == None: # jesli nie udalo sie odebrac chociaz naglowka, wyjdz
-			 	logger_debug.debug('[ClientThread]\t Exiting')
+			 	logger_debug.debug('[ClientThread]\t No message has been received - exiting')
 				self.ClientSock.close()
 				return
 			logger_debug.debug('[ClientThread]\t Receiving message') 
 			msgLen = struct.unpack('<H', myScadaMessage[7:])
-			myScadaMessage += recvall(self.ClientSock, msgLen[0]) # tu tez potencjalnie moga byc bledy
+			tempScadaMessage = recvall(self.ClientSock, msgLen[0]) # tu tez potencjalnie moga byc bledy
+			if tempScadaMessage == None: 
+			 	logger_debug.debug('[ClientThread]\t Didnt receive full message - exiting')
+				self.ClientSock.close()
+				return
+			logger_debug.debug('[ClientThread]\t Received full message from SCADA')
+			myScadaMessage += tempScadaMessage
 			logger_debug.debug(SLMP.binary_array2string(myScadaMessage))
 
 			notEmpty.acquire()
@@ -165,7 +182,7 @@ class ClientThread (threading.Thread):
 
 			waitngForMessage.release()
 			logger_debug.debug('[ClientThread]\t Waiting for response from server')
-			time.sleep(2)
+			time.sleep(3)
 
 			waitingForResponse.acquire()
 			myServerReply = serverReply
@@ -175,14 +192,21 @@ class ClientThread (threading.Thread):
 			notEmpty.notify()
 			notEmpty.release()
 
-			self.ClientSock.send(myServerReply) # tu tez moga byc bledy, tez exit
-			logger_debug.debug('[ClientThread]\t Reply sent to SCADA')
-			logger_info.info('\n' + 'IP\t\t  -->\t  ' + str(SCADA_IP) + '\n' + 
-				 'SCADA_PORT\t  -->\t  ' + str(SCADA_PORT) + '\n' +
-				 'SCADA_MESSAGE\t  -->\t  ' + repr(scadaMessage) + '\n' +
-				 'SERVER_PORT\t  -->\t  ' + str(PLC_SERVER_PORT) + '\n' + 
-				 'SERVER_REPLY\t  -->\t  ' + repr(serverReply) + '\n' +
-				 '********************************************************************************************')
+			try:
+				retVal = self.ClientSock.sendall(myServerReply)
+			except Exception:
+				logger_debug.debug('[ClientThread]\t Exception raised by sendall - unlikely when running on the same PC')
+			if retVal == None: # sendall udane
+				logger_debug.debug('[ClientThread]\t Reply sent to SCADA')
+				logger_info.info('\n' + 'IP\t\t  -->\t  ' + str(SCADA_IP) + '\n' + 
+					'SCADA_PORT\t  -->\t  ' + str(SCADA_PORT) + '\n' +
+					'SCADA_MESSAGE\t  -->\t  ' + repr(scadaMessage) + '\n' +
+					'SERVER_PORT\t  -->\t  ' + str(PLC_SERVER_PORT) + '\n' + 
+					'SERVER_REPLY\t  -->\t  ' + repr(serverReply) + '\n' +
+					'********************************************************************************************')
+			else:
+				logger_debug.debug('[ClientThread]\t SCADA left without getting a reply - exiting')
+				return
 
 
 
@@ -212,6 +236,7 @@ ClientSock.listen(1)
 logger_debug.debug("Proxy oczekuje polaczen na porcie " + str(SCADA_PORT))
 while True:
 	NewClientSock = ClientSock.accept()[0]
+	NewClientSock.settimeout(1)
 	newThread = ClientThread(NewClientSock) 
 	clientThreadsCollection.append(newThread)
 	newThread.daemon = True
