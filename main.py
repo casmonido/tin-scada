@@ -25,13 +25,14 @@ global serverReply
 global SCADA_IP  
 global SCADA_PORT 
 global PLC_SERVER_PORT
-
+global LOGGER_CONFIG
 
 
 def configure(configFilePath):
 	global SCADA_IP, SCADA_PORT 
 	global PLC_SERVER_PORT 
 	global SCADA_BUFFER_SIZE, SERVER_BUFFER_SIZE
+	global LOGGER_CONFIG
 
 	configFile = open(configFilePath)
 
@@ -43,6 +44,8 @@ def configure(configFilePath):
 	PLC_SERVER_PORT =linecache.getline(configFilePath, 3)
 	PLC_SERVER_PORT = PLC_SERVER_PORT[17:-1]
 	PLC_SERVER_PORT = int(PLC_SERVER_PORT)
+	LOGGER_CONFIG = linecache.getline(configFilePath, 4)
+	LOGGER_CONFIG = LOGGER_CONFIG[15:-1]
 	configFile.close()
 
 
@@ -218,7 +221,7 @@ configure(sys.argv[1])
 
 
 #logger configuration file
-logging.config.fileConfig('logger.conf')
+logging.config.fileConfig(LOGGER_CONFIG)
 
 # create logger
 logger_info = logging.getLogger('IMessage')
