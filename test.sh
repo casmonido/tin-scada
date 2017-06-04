@@ -1,8 +1,8 @@
 #!/bin/sh
 
-writeFile='test_res_write.txt'
-readFile='test_res_read.txt'
-randReadFile='test_res_rand_read.txt'
+writeFile='log/test/test_res_write.txt'
+readFile='log/test/test_res_read.txt'
+randReadFile='log/test/test_res_rand_read.txt'
 
 echo 'We are ready to start testing our program\n\n'
 echo 'In the beginning we will run some SCADA scripts, that will write a value into registers'
@@ -14,7 +14,7 @@ exec > $writeFile
 
 #                czas port wart 
 python plc_write.py 20 100 &
-sleep 1
+sleep .5
 
 python plc_write.py 25 200 2 &
 python plc_write.py 30 300 4 &
@@ -23,20 +23,23 @@ sleep 1
 python plc_write.py 35 400 8 &
 python plc_write.py 40 500 16 &
 python plc_write.py 45 600 32 &
-sleep 2
+sleep .5
 
 python plc_write.py 50 700 64 &
 python plc_write.py 55 800 128 &
 python plc_write.py 60 900 256 &
+sleep .5
+
 python plc_write.py 65 1000 512 &
 python plc_write.py 70 1100 458 &
 python plc_write.py 80 1200 586 &
 sleep .5
 
 python plc_write.py 85 1300 23 &
-python plc_write.py 95 1400 44 &
+python plc_write.py 95 1400 & 
 python plc_write.py 90 1500 10 &
-python plc_write.py 100 1600 
+python plc_write.py 100 1600 586 
+sleep .5
 
 #reseting stdout, because we will need to make one more redirection to another file
 exec 1>&6 6>&-

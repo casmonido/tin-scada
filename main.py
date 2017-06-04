@@ -11,6 +11,7 @@ import logging.config
 import SLMP
 import linecache
 import errno
+import os
 from logging.handlers import TimedRotatingFileHandler
 from socket import error as socket_error
 
@@ -25,28 +26,32 @@ global scadaMessage
 global serverReply
 
 # zmienne ustawiane przy konfiguracji srodowiska
-global SCADA_IP  
+global SCADA_IP
+global PLC_SERVER_IP  
 global SCADA_PORT 
 global PLC_SERVER_PORT
 global LOGGER_CONFIG
 
+
 #funkcja, ktora czyta z pliku konfiguracyjnego dane wejsciowe polaczenia
 def configure(configFilePath):
 	global SCADA_IP, SCADA_PORT 
-	global PLC_SERVER_PORT 
+	global PLC_SERVER_IP, PLC_SERVER_PORT 
 	global LOGGER_CONFIG
 
 	configFile = open(configFilePath)
 
 	SCADA_IP = linecache.getline(configFilePath, 1) # pobierz linie
 	SCADA_IP = SCADA_IP[10:-1] # znajac format linii: 'SCADA_IP: 127.0.0.1', pobierz znaki od 10-go do przedostaniego
-	SCADA_PORT = linecache.getline(configFilePath, 2)
+	PLC_SERVER_IP = linecache.getline(configFilePath, 2)
+	PLC_SERVER_IP = PLC_SERVER_IP[15:-1]
+	SCADA_PORT = linecache.getline(configFilePath, 3)
 	SCADA_PORT = SCADA_PORT[12:-1]
 	SCADA_PORT = int(SCADA_PORT)
-	PLC_SERVER_PORT =linecache.getline(configFilePath, 3)
+	PLC_SERVER_PORT =linecache.getline(configFilePath, 4)
 	PLC_SERVER_PORT = PLC_SERVER_PORT[17:-1]
 	PLC_SERVER_PORT = int(PLC_SERVER_PORT)
-	LOGGER_CONFIG = linecache.getline(configFilePath, 4)
+	LOGGER_CONFIG = linecache.getline(configFilePath, 5)
 	LOGGER_CONFIG = LOGGER_CONFIG[15:-1]
 	configFile.close()
 
@@ -173,7 +178,7 @@ class ClientThread (threading.Thread):
 		global occupied, scadaMessage, serverReply
 		while True:
 			logger_debug.debug('[ClientThread]\t Waitng for message')
-			time.sleep(3)
+			time.sleep(1.5)
 			myScadaMessage = recvall(self.ClientSock, 9, '[ClientThread]\t')
 
 			if myScadaMessage == None: # jesli nie udalo sie odebrac chociaz naglowka, wyjdz
@@ -205,7 +210,7 @@ class ClientThread (threading.Thread):
 
 			waitngForMessage.release()
 			logger_debug.debug('[ClientThread]\t Waiting for response from server')
-			time.sleep(3)
+			time.sleep(1.5)
 
 			waitingForResponse.acquire()
 			myServerReply = serverReply
@@ -223,7 +228,8 @@ class ClientThread (threading.Thread):
 
 			if retVal == None: # sendall udane
 				logger_debug.debug('[ClientThread]\t Reply sent to SCADA')
-				logger_info.info('\n' + 'IP\t\t  -->\t  ' + str(SCADA_IP) + '\n' + 
+				logger_info.info('\n' + 'SCADA_IP\t  -->\t\t  ' + str(SCADA_IP) + '\n' +
+					'PLC_SERVER_IP\t -->\t\t  ' + str(PLC_SERVER_IP) + '\n' + 
 					'SCADA_PORT\t  -->\t  ' + str(SCADA_PORT) + '\n' +
 					'SCADA_MESSAGE\t  -->\t  ' + repr(scadaMessage) + '\n' +
 					'SERVER_PORT\t  -->\t  ' + str(PLC_SERVER_PORT) + '\n' + 
@@ -240,6 +246,11 @@ try:
 		logger_debug.debug("[ERROR] Please write a path to configuration file")
 		quit()
 
+	#tworzy foldery do logow
+	if not os.path.exists('log/messages'):
+    		os.makedirs('log/messages')
+		os.makedirs('log/test')
+
 	configure(sys.argv[1])
 
 	#logger configuration file
@@ -250,7 +261,7 @@ try:
 	logger_debug = logging.getLogger('DMessage')
 
 	# tworzenie watku serwera
-	serverThread = ServerThread('127.0.0.1', PLC_SERVER_PORT)
+	serverThread = ServerThread(PLC_SERVER_IP, PLC_SERVER_PORT)
 	serverThread.daemon = True		# watek zostanie zamkniety/umrze kiedy zginie watek glowny
 	serverThread.start()
 	
