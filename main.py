@@ -19,7 +19,8 @@ waitngForMessage = threading.Semaphore(0)
 waitingForResponse = threading.Semaphore(0) 
 notEmpty = threading.Condition()
 occupied = 0
- 
+
+#zmienne przesylanych wiadomosci 
 global scadaMessage
 global serverReply
 
@@ -29,7 +30,7 @@ global SCADA_PORT
 global PLC_SERVER_PORT
 global LOGGER_CONFIG
 
-
+#funkcja, ktora czyta z pliku konfiguracyjnego dane wejsciowe polaczenia
 def configure(configFilePath):
 	global SCADA_IP, SCADA_PORT 
 	global PLC_SERVER_PORT 
@@ -52,7 +53,7 @@ def configure(configFilePath):
 
 
 # funkcja pomocnicza do odbierania zadanej liczby bajtow za pomaca recv(), jesli bedzie mniej bajtow zwraca None
-def recvall(sock, expectedLen):
+def recvall(sock, expectedLen, threadType):
 	data = ''
 	
 	while len(data) < expectedLen:
@@ -60,16 +61,15 @@ def recvall(sock, expectedLen):
 			packet = sock.recv(expectedLen - len(data)) # recv() pobierze maksimum tyle bajtow, ile podane w argumencie
 		
 		except socket.timeout as err:
-			logger_debug.debug('Timeout error - receive returning empty string')
+			logger_debug.debug(threadType + 'Timeout error - receive returning empty string')
 			return None
 		
 		if not packet: # None jesli 'connection reset by peer'
-			logger_debug.debug('Receive returning empty string')
+			logger_debug.debug(threadType + 'Receive returning empty string')
 			return None
 
 		data += packet
 	return data
-
 
 
 
@@ -99,7 +99,7 @@ def reconnect(addr, port):
 
 
 
-
+#definicja klasy watku serwera
 class ServerThread (threading.Thread):
 
 	def __init__(self, ip, port):
@@ -113,6 +113,7 @@ class ServerThread (threading.Thread):
 		
 		while True:					
 			waitngForMessage.acquire()
+			
 			# scadaMessage czeka w swoim buforze. 
 			# obsluguj ja do skutku
 			while True:
@@ -131,7 +132,7 @@ class ServerThread (threading.Thread):
 				logger_debug.debug('[ServerThread]\t SCADA message sent to server')
 				# pobierz naglowek odpowiedzi 
 				# jesli sie nie uda, po resecie polaczenia trzeba wrocic DO WYSYLANIA WIADOMOSCI DO SEWERA
-				myServerReply = recvall(ServerSock, 9) # pobierz 9 znakow - zob. SMLP manual str. 23
+				myServerReply = recvall(ServerSock, 9, '[ServerThread]\t') # pobierz 9 znakow - zob. SMLP manual str. 23
 
 				if myServerReply == None:
 					logger_debug.debug('[ServerThread]\t Error receiving server\'s reply header')
@@ -143,7 +144,7 @@ class ServerThread (threading.Thread):
 				# dowiedz sie jak dluga jest reszta 
 				msgLen = struct.unpack('<H', myServerReply[7:]) # <H means litle endian ushort
 				# pobierz reszte
-				tempServerReply = recvall(ServerSock, msgLen[0]) # msgLen to tuple (krotka)
+				tempServerReply = recvall(ServerSock, msgLen[0], '[ServerThread]\t') # msgLen to tuple (krotka)
 
 				if tempServerReply == None:
 					logger_debug.debug('[ServerThread]\t Error receiving server\'s reply')
@@ -155,13 +156,13 @@ class ServerThread (threading.Thread):
 					logger_debug.debug('[ServerThread]\t Received server reply')
 					break # wszystko sie udalo, mozna isc dalej
 
-			logger_debug.debug(SLMP.binary_array2string(myServerReply))
+			logger_debug.debug('[ServerThread]\t' + SLMP.binary_array2string(myServerReply))
 			serverReply = myServerReply
 
 			waitingForResponse.release()	
 
 
-
+#definicja klasy watkow klientow
 class ClientThread (threading.Thread):
 
 	def __init__(self, ClientSock):
@@ -173,7 +174,7 @@ class ClientThread (threading.Thread):
 		while True:
 			logger_debug.debug('[ClientThread]\t Waitng for message')
 			time.sleep(3)
-			myScadaMessage = recvall(self.ClientSock, 9)
+			myScadaMessage = recvall(self.ClientSock, 9, '[ClientThread]\t')
 
 			if myScadaMessage == None: # jesli nie udalo sie odebrac chociaz naglowka, wyjdz
 			 	logger_debug.debug('[ClientThread]\t No message has been received - exiting')
@@ -182,7 +183,7 @@ class ClientThread (threading.Thread):
 
 			logger_debug.debug('[ClientThread]\t Receiving message') 
 			msgLen = struct.unpack('<H', myScadaMessage[7:])
-			tempScadaMessage = recvall(self.ClientSock, msgLen[0]) # tu tez potencjalnie moga byc bledy
+			tempScadaMessage = recvall(self.ClientSock, msgLen[0], '[ClientThread]\t') # tu tez potencjalnie moga byc bledy
 
 			if tempScadaMessage == None: 
 			 	logger_debug.debug('[ClientThread]\t Didnt receive full message - exiting')
@@ -191,7 +192,7 @@ class ClientThread (threading.Thread):
 
 			logger_debug.debug('[ClientThread]\t Received full message from SCADA')
 			myScadaMessage += tempScadaMessage
-			logger_debug.debug(SLMP.binary_array2string(myScadaMessage))
+			logger_debug.debug('[ClientThread]\t' + SLMP.binary_array2string(myScadaMessage))
 
 			notEmpty.acquire()
 
@@ -236,7 +237,7 @@ class ClientThread (threading.Thread):
 try:
 	# konfiguracja srodowiska: 
 	if  len(sys.argv) < 2:
-		logger_debug.debug("Please write a path to configuration file")
+		logger_debug.debug("[ERROR] Please write a path to configuration file")
 		quit()
 
 	configure(sys.argv[1])
@@ -248,21 +249,19 @@ try:
 	logger_info = logging.getLogger('IMessage')
 	logger_debug = logging.getLogger('DMessage')
 
-	#co minute beda tworzone nowe pliki logow. Max liczba takich plikow - 20
-	#handler = TimedRotatingFileHandler('log_messages.txt', when="m", interval=1, backupCount=20)
-	#logger_info.addHandler(handler)
-
-	# tworzenie watkow:
+	# tworzenie watku serwera
 	serverThread = ServerThread('127.0.0.1', PLC_SERVER_PORT)
 	serverThread.daemon = True		# watek zostanie zamkniety/umrze kiedy zginie watek glowny
 	serverThread.start()
-
+	
+	# tworzenie watkow klientow
 	clientThreadsCollection = []
 	ClientSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	ClientSock.bind((SCADA_IP, SCADA_PORT)) #socket.gethostname() for IP does not work
 	ClientSock.listen(1)
 	logger_debug.debug("Proxy is waiting for connection on port " + str(SCADA_PORT))
 
+	#petla glowna dzialania proxy
 	while True:
 		NewClientSock = ClientSock.accept()[0]
 		NewClientSock.settimeout(1)
@@ -270,6 +269,6 @@ try:
 		clientThreadsCollection.append(newThread)
 		newThread.daemon = True
 		newThread.start()
-
-except KeyboardInterrupt:
+	
+except KeyboardInterrupt:	
 	logger_debug.debug('Proxy ended it\'s work. Bye!')
